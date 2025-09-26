@@ -347,10 +347,7 @@ metrics = calculate_performance_metrics(trials_df)
 ## Dependencies
 
 - Python 3.6+
-- pandas
-- numpy
-- h5py
-- tables (pytables)
+- Runtime Python packages are listed in [`requirements.txt`](requirements.txt) and include core libraries such as pandas, numpy, scipy, matplotlib, seaborn, h5py, and tables (PyTables).
 
 ## Installation
 
@@ -360,7 +357,7 @@ git clone https://github.com/your-org/DELTA_Behavior.git
 cd DELTA_Behavior
 
 # Install dependencies
-pip install pandas numpy h5py tables
+pip install -r requirements.txt
 ```
 
 ## Notes

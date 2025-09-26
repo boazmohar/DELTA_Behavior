@@ -1,0 +1,24 @@
+Cue-Aligned Licking Analysis Summary
+==================================================
+
+Total trials analyzed: 442
+Rewarded trials: 0
+Unrewarded trials: 0
+
+Top licking zones (relative to cue at 0cm):
+----------------------------------------
+
+Rewarded trials:
+
+Unrewarded trials:
+
+----------------------------------------
+Spatial distribution:
+
+Rewarded trials:
+  Pre-cue licking (<0 cm): 0.00 licks/trial
+  Post-cue licking (≥0 cm): 0.00 licks/trial
+
+Unrewarded trials:
+  Pre-cue licking (<0 cm): 0.00 licks/trial
+  Post-cue licking (≥0 cm): 0.00 licks/trial

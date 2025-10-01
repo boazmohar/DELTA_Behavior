@@ -1,189 +1,397 @@
 """
-Simplified corridor detector based on Cue_State ID counting.
+Corridor detection helpers for DELTA behavior sessions.
 
-Corridors are defined by the cycling of cue IDs (0-6).
-Each time we see ID=0 after ID=6, it's a new corridor.
+The helpers in this module expose small, composable steps so that notebooks can
+inspect intermediate results (cue/corridor assignments, position loops, etc.)
+while the main pipeline still offers the `detect_corridors_simple` convenience
+function used by the HDF5 export.
 """
 
-import pandas as pd
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
-from typing import Tuple, Optional, Dict
+import pandas as pd
+
+from behavioral_analysis.processing.trial_matcher import match_cues_robust
+
+
+@dataclass
+class CorridorComputationArtifacts:
+    """Container for corridor detection artifacts."""
+
+    corridor_info: pd.DataFrame
+    position_loops: pd.DataFrame
+    cue_state_with_corridors: pd.DataFrame
+    cue_result_with_corridors: Optional[pd.DataFrame]
+    cue_matches: Optional[pd.DataFrame]
+
+
+def _ensure_dataframe(df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    if df is None or len(df) == 0:
+        return pd.DataFrame()
+    return df.copy()
+
+
+def annotate_cue_states_with_corridors(cue_state_df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """Add `corridor_id`/`cue_index` columns to Cue_State events."""
+
+    cue_state_df = _ensure_dataframe(cue_state_df)
+    if cue_state_df.empty or 'id' not in cue_state_df:
+        return cue_state_df
+
+    cue_state_df = cue_state_df.sort_values('time').reset_index(drop=True)
+
+    corridor_ids: List[int] = []
+    corridor_id = 0
+    for idx, cue_id in enumerate(cue_state_df['id']):
+        if idx > 0 and cue_id == 0:
+            corridor_id += 1
+        corridor_ids.append(corridor_id)
+
+    cue_state_df['corridor_id'] = corridor_ids
+    cue_state_df['cue_index'] = cue_state_df.groupby('corridor_id').cumcount()
+
+    return cue_state_df
+
+
+def annotate_cue_results_with_corridors(cue_result_df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """Add `corridor_id`/`cue_index` columns to Cue_Result events."""
+
+    cue_result_df = _ensure_dataframe(cue_result_df)
+    if cue_result_df.empty or 'id' not in cue_result_df:
+        return cue_result_df
+
+    cue_result_df = cue_result_df.sort_values('time').reset_index(drop=True)
+
+    corridor_flow = cue_result_df['id'].eq(0).cumsum()
+    if len(corridor_flow) > 0 and corridor_flow.iloc[0] == 0:
+        corridor_flow += 1
+    cue_result_df['corridor_id'] = corridor_flow - 1
+    cue_result_df['cue_index'] = cue_result_df.groupby('corridor_id').cumcount()
+
+    return cue_result_df
+
+
+def match_cue_states_to_results(
+    cue_state_df: pd.DataFrame,
+    cue_result_df: pd.DataFrame,
+    verbose: bool = True
+) -> pd.DataFrame:
+    """Match Cue_State and Cue_Result rows using existing robust matcher."""
+
+    cue_state_df = _ensure_dataframe(cue_state_df)
+    cue_result_df = _ensure_dataframe(cue_result_df)
+
+    if cue_state_df.empty or cue_result_df.empty:
+        return pd.DataFrame(
+            columns=[
+                'state_idx',
+                'result_idx',
+                'corridor_id',
+                'cue_id',
+                'state_time',
+                'result_time',
+                'state_position',
+                'result_position',
+                'is_rewarding',
+                'has_given_reward',
+                'num_licks_reward',
+                'num_licks_pre',
+                'reaction_time_ms',
+            ]
+        )
+
+    matches = match_cues_robust(cue_state_df, cue_result_df, verbose=verbose)
+
+    rows = []
+    for match in matches:
+        state = match['state']
+        result = match['result']
+        state_time = state.get('time')
+        result_time = result.get('time')
+
+        rows.append(
+            {
+                'state_idx': match.get('state_idx'),
+                'result_idx': match.get('result_idx'),
+                'corridor_id': result.get('corridor_id', np.nan),
+                'cue_id': state.get('id', np.nan),
+                'state_time': state_time,
+                'result_time': result_time,
+                'state_position': state.get('position', np.nan),
+                'result_position': result.get('position', np.nan),
+                'is_rewarding': state.get('isRewarding'),
+                'has_given_reward': result.get('hasGivenReward'),
+                'num_licks_reward': result.get('numLicksInReward'),
+                'num_licks_pre': result.get('numLicksInPre'),
+                'reaction_time_ms': result_time - state_time if None not in (state_time, result_time) else np.nan,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def detect_position_loops(
+    position_df: Optional[pd.DataFrame],
+    low_threshold: float = 1500.0,
+    high_threshold: float = 45000.0,
+    verbose: bool = True
+) -> pd.DataFrame:
+    """Detect corridor traversals from path position data."""
+
+    position_df = _ensure_dataframe(position_df)
+    if position_df.empty or 'position' not in position_df:
+        return position_df.head(0)
+
+    df = position_df.sort_values('time').reset_index(drop=True)
+
+    loops: List[Dict[str, float]] = []
+    in_loop = False
+    start_idx = 0
+    start_time = 0.0
+    start_pos = 0.0
+    min_pos = np.inf
+    max_pos = -np.inf
+    reached_high = False
+
+    for idx, row in df.iterrows():
+        pos = row['position']
+        if not in_loop:
+            if pos <= low_threshold:
+                in_loop = True
+                start_idx = idx
+                start_time = row['time']
+                start_pos = pos
+                min_pos = pos
+                max_pos = pos
+                reached_high = pos >= high_threshold
+            continue
+
+        min_pos = min(min_pos, pos)
+        max_pos = max(max_pos, pos)
+        if not reached_high and pos >= high_threshold:
+            reached_high = True
+
+        if reached_high and pos <= low_threshold:
+            end_idx = idx
+            end_time = row['time']
+            loops.append(
+                {
+                    'corridor_id': len(loops),
+                    'start_time': start_time,
+                    'end_time': end_time,
+                    'start_position': start_pos,
+                    'end_position': pos,
+                    'min_position': float(min_pos),
+                    'max_position': float(max_pos),
+                    'loop_complete': True,
+                }
+            )
+            in_loop = False
+
+    if in_loop:
+        end_row = df.iloc[-1]
+        loops.append(
+            {
+                'corridor_id': len(loops),
+                'start_time': start_time,
+                'end_time': end_row['time'],
+                'start_position': start_pos,
+                'end_position': end_row['position'],
+                'min_position': float(min_pos if np.isfinite(min_pos) else start_pos),
+                'max_position': float(max_pos if np.isfinite(max_pos) else start_pos),
+                'loop_complete': False,
+            }
+        )
+
+    loops_df = pd.DataFrame(loops)
+    if verbose and not loops_df.empty:
+        print(f"  Detected {len(loops_df)} position-based corridor loops")
+
+    return loops_df
+
+
+def _corridor_table_from_cue_states(cue_state_df: pd.DataFrame) -> pd.DataFrame:
+    if cue_state_df.empty:
+        return cue_state_df.head(0)
+
+    grouped = cue_state_df.groupby('corridor_id')['time'].agg(['min', 'max']).reset_index()
+    grouped.rename(columns={'min': 'start_time', 'max': 'end_time'}, inplace=True)
+    grouped['start_position'] = cue_state_df.groupby('corridor_id')['position'].first().values
+    grouped['end_position'] = cue_state_df.groupby('corridor_id')['position'].last().values
+    grouped['min_position'] = cue_state_df.groupby('corridor_id')['position'].min().values
+    grouped['max_position'] = cue_state_df.groupby('corridor_id')['position'].max().values
+    grouped['loop_complete'] = pd.NA
+    return grouped
+
+
+def summarize_corridor_info(
+    position_loops: pd.DataFrame,
+    cue_state_df: pd.DataFrame,
+    cue_result_df: Optional[pd.DataFrame] = None,
+    cue_matches: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Combine timing/statistics from position loops and cue matches."""
+
+    position_loops = _ensure_dataframe(position_loops)
+    cue_state_df = _ensure_dataframe(cue_state_df)
+    cue_result_df = _ensure_dataframe(cue_result_df)
+    cue_matches = _ensure_dataframe(cue_matches)
+
+    if position_loops.empty:
+        base = _corridor_table_from_cue_states(cue_state_df)
+    else:
+        base = position_loops.copy()
+
+    if base.empty:
+        return base
+
+    base = base.sort_values('corridor_id').reset_index(drop=True)
+    base['duration_ms'] = base['end_time'] - base['start_time']
+    base['start_position_cm'] = base['start_position'] / 250.0
+    base['end_position_cm'] = base['end_position'] / 250.0
+    base['max_position_cm'] = base['max_position'] / 250.0
+    base['trigger'] = np.where(base['corridor_id'] == 0, 'first_loop', 'loop_reset')
+
+    if not cue_result_df.empty:
+        stats = cue_result_df.groupby('corridor_id').agg(
+            num_cue_results=('id', 'count'),
+            first_cue_time=('time', 'min'),
+            last_cue_time=('time', 'max'),
+        )
+        base = base.merge(stats, on='corridor_id', how='left')
+
+    if not cue_matches.empty:
+        match_stats = cue_matches.groupby('corridor_id').agg(
+            num_matched_cues=('cue_id', 'count'),
+            first_match_time=('result_time', 'min'),
+            last_match_time=('result_time', 'max'),
+        )
+        base = base.merge(match_stats, on='corridor_id', how='left')
+
+    return base
+
+
+def compute_corridor_artifacts(
+    cue_state_df: Optional[pd.DataFrame],
+    position_df: Optional[pd.DataFrame] = None,
+    cue_result_df: Optional[pd.DataFrame] = None,
+    corridor_length_cm: float = 500.0,
+    verbose: bool = True,
+) -> CorridorComputationArtifacts:
+    """Derive all intermediate artifacts needed to describe corridors."""
+
+    if verbose:
+        print("Detecting corridor structure...")
+
+    cue_state_with_corridors = annotate_cue_states_with_corridors(cue_state_df)
+    cue_result_with_corridors = annotate_cue_results_with_corridors(cue_result_df)
+    position_loops = detect_position_loops(position_df, verbose=verbose)
+
+    cue_matches = match_cue_states_to_results(
+        cue_state_with_corridors,
+        cue_result_with_corridors,
+        verbose=verbose,
+    ) if not cue_state_with_corridors.empty and not cue_result_with_corridors.empty else pd.DataFrame()
+
+    corridor_info = summarize_corridor_info(
+        position_loops,
+        cue_state_with_corridors,
+        cue_result_with_corridors,
+        cue_matches,
+    )
+
+    return CorridorComputationArtifacts(
+        corridor_info=corridor_info,
+        position_loops=position_loops,
+        cue_state_with_corridors=cue_state_with_corridors,
+        cue_result_with_corridors=cue_result_with_corridors if not cue_result_with_corridors.empty else None,
+        cue_matches=cue_matches if not cue_matches.empty else None,
+    )
 
 
 def detect_corridors_simple(
     cue_df: pd.DataFrame,
     position_df: Optional[pd.DataFrame] = None,
     corridor_length_cm: float = 500.0,
-    verbose: bool = True
+    verbose: bool = True,
+    cue_result_df: Optional[pd.DataFrame] = None,
 ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
-    """
-    Detect corridors based on Cue_State ID cycling (0-6).
+    """Pipeline-friendly wrapper returning corridor info and annotated positions."""
 
-    Args:
-        cue_df: DataFrame with Cue_State events
-        position_df: Optional position data
-        corridor_length_cm: Length of each corridor in cm
-        verbose: Print progress information
+    artifacts = compute_corridor_artifacts(
+        cue_state_df=cue_df,
+        position_df=position_df,
+        cue_result_df=cue_result_df,
+        corridor_length_cm=corridor_length_cm,
+        verbose=verbose,
+    )
 
-    Returns:
-        Tuple of (corridor_info, position_with_corridors)
-    """
-    if verbose:
-        print("Detecting corridors based on Cue_State ID cycling...")
+    if artifacts.corridor_info.empty and verbose:
+        print("  No corridor boundaries detected")
 
-    # Sort by time
-    cue_df = cue_df.sort_values('time').reset_index(drop=True)
-
-    # Detect corridor transitions based on cue ID cycling
-    corridor_starts = []
-    corridor_counter = 0
-
-    # First corridor starts with the first cue
-    if len(cue_df) > 0:
-        corridor_starts.append({
-            'corridor_id': 0,
-            'start_time': cue_df.iloc[0]['time'],
-            'trigger': 'first_cue'
-        })
-
-    # Find transitions where ID goes from any value to 0 (except the first)
-    for idx in range(1, len(cue_df)):
-        if cue_df.iloc[idx]['id'] == 0:
-            corridor_counter += 1
-            corridor_starts.append({
-                'corridor_id': corridor_counter,
-                'start_time': cue_df.iloc[idx]['time'],
-                'trigger': 'cue_reset'
-            })
-
-    # Convert to DataFrame
-    corridor_info = pd.DataFrame(corridor_starts)
-
-    # Add end times
-    for idx in range(len(corridor_info) - 1):
-        corridor_info.loc[idx, 'end_time'] = corridor_info.loc[idx + 1, 'start_time']
-
-    # Last corridor ends at the last event time
-    if position_df is not None and len(position_df) > 0:
-        corridor_info.loc[len(corridor_info) - 1, 'end_time'] = position_df['time'].max()
-    else:
-        corridor_info.loc[len(corridor_info) - 1, 'end_time'] = cue_df['time'].max()
-
-    if verbose:
-        print(f"Detected {len(corridor_info)} corridors")
-
-    # Process position data if provided
     position_with_corridors = None
-    if position_df is not None:
+    if position_df is not None and not artifacts.corridor_info.empty:
         position_with_corridors = add_corridor_to_position(
             position_df,
-            corridor_info,
+            artifacts.corridor_info,
             corridor_length_cm,
-            verbose
+            verbose,
         )
 
-    return corridor_info, position_with_corridors
+    return artifacts.corridor_info, position_with_corridors
 
 
 def add_corridor_to_position(
     position_df: pd.DataFrame,
     corridor_info: pd.DataFrame,
     corridor_length_cm: float = 500.0,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> pd.DataFrame:
-    """
-    Add corridor IDs and global position to position data.
-    Creates cumulative position by adding position values across teleports.
-
-    Args:
-        position_df: Position DataFrame
-        corridor_info: Corridor information
-        corridor_length_cm: Length of each corridor
-        verbose: Print progress
-
-    Returns:
-        Position DataFrame with corridor and global position
-    """
     position_df = position_df.copy().sort_values('time').reset_index(drop=True)
 
-    # Assign corridor IDs based on time
     position_df['corridor_id'] = np.nan
-
     for _, corridor in corridor_info.iterrows():
-        mask = (position_df['time'] >= corridor['start_time']) & \
-               (position_df['time'] < corridor['end_time'])
+        mask = (position_df['time'] >= corridor['start_time']) & (position_df['time'] < corridor['end_time'])
         position_df.loc[mask, 'corridor_id'] = corridor['corridor_id']
 
-    # Create cumulative position that handles teleports
-    # Work with raw position values first
     position_df['cumulative_position'] = position_df['position'].copy()
-
-    # Detect teleports (large backward jumps in raw position)
     position_df['pos_diff'] = position_df['position'].diff()
     teleport_mask = position_df['pos_diff'] < -30000
 
     if teleport_mask.any():
         teleport_indices = position_df[teleport_mask].index.tolist()
-
-        # Track cumulative offset from teleports
         cumulative_offset = 0
-
-        for i, tel_idx in enumerate(teleport_indices):
+        for tel_idx in teleport_indices:
             if tel_idx > 0:
-                # Get the last value before teleport
                 last_value_before = position_df.loc[tel_idx - 1, 'cumulative_position']
-                # Get the first value after teleport (current position)
-                first_value_after = position_df.loc[tel_idx, 'position']
-
-                # Calculate new offset: last cumulative value + current position value
-                # This ensures continuity: the new position continues from where we left off
-                new_offset = last_value_before
-
-                # Apply this offset to all positions from this teleport onwards
                 position_df.loc[tel_idx:, 'cumulative_position'] = (
-                    position_df.loc[tel_idx:, 'position'] + new_offset
+                    position_df.loc[tel_idx:, 'position'] + last_value_before
                 )
-
-                cumulative_offset = new_offset
-
+                cumulative_offset = last_value_before
         if verbose:
             print(f"  Detected {len(teleport_indices)} teleports, created cumulative position")
 
-    # Now convert cumulative position to cm
-    # Using the original conversion factor: 50000 units = 500 cm
     position_df['position_cm'] = position_df['position'] / 250.0
     position_df['cumulative_position_cm'] = position_df['cumulative_position'] / 250.0
 
-    # Calculate global position using corridor offset and cumulative position
-    # For corridor 1 (id=0), offset is 0; for corridor 2 (id=1), offset is 500cm, etc.
     mask = ~position_df['corridor_id'].isna()
-
-    # Use cumulative position for events within corridors
-    position_df.loc[mask, 'global_position_cm'] = (
-        (position_df.loc[mask, 'corridor_id'] - 1) * corridor_length_cm +
-        position_df.loc[mask, 'cumulative_position_cm'] % corridor_length_cm
-    )
-
-    # Alternative: Just use the cumulative position directly as global position
-    # This might be more accurate since teleports happen within corridors
     position_df.loc[mask, 'global_position_cm'] = position_df.loc[mask, 'cumulative_position_cm']
 
-    # Drop helper columns
     position_df = position_df.drop(columns=['pos_diff', 'cumulative_position', 'cumulative_position_cm'], errors='ignore')
 
     if verbose:
         n_assigned = mask.sum()
         total = len(position_df)
-        print(f"  Assigned corridor IDs to {n_assigned}/{total} position events ({n_assigned/total*100:.1f}%)")
-
-        # Check monotonicity
+        print(f"  Assigned corridor IDs to {n_assigned}/{total} position events ({n_assigned / total * 100:.1f}%)")
         position_sorted = position_df.sort_values('time')
         global_diff = position_sorted['global_position_cm'].diff()
-        n_negative = (global_diff < -0.1).sum()  # Allow tiny rounding errors
+        n_negative = (global_diff < -0.1).sum()
         if n_negative > 0:
             print(f"  WARNING: {n_negative} non-monotonic global position events remain")
         else:
-            print(f"  ✓ Global position is monotonically increasing")
+            print("  ✓ Global position is monotonically increasing")
 
     return position_df
 
@@ -193,36 +401,19 @@ def add_corridor_info_to_events(
     corridor_info: pd.DataFrame,
     corridor_length_cm: float = 500.0,
     verbose: bool = True,
-    position_df: Optional[pd.DataFrame] = None
+    position_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, pd.DataFrame]:
-    """
-    Add corridor and global position information to all event types.
-
-    Args:
-        dataframes: Dictionary of event DataFrames
-        corridor_info: Corridor information
-        corridor_length_cm: Length of each corridor
-        verbose: Print progress
-        position_df: Position dataframe with cumulative positions (for reference)
-
-    Returns:
-        Updated dictionary of DataFrames
-    """
     updated = {}
 
-    # Get teleport information from position_df if available
-    teleport_times = []
-    teleport_offsets = {}
+    teleport_times: List[float] = []
+    teleport_offsets: Dict[float, float] = {}
 
     if position_df is not None and 'Position' in dataframes:
-        # The Position df already has corrected global positions
-        # We'll use it as reference for other events
         pos_sorted = position_df.sort_values('time').reset_index(drop=True)
         pos_sorted['pos_diff'] = pos_sorted['position'].diff()
         teleport_mask = pos_sorted['pos_diff'] < -30000
 
         if teleport_mask.any():
-            # Build a map of teleport times and their cumulative offsets
             cumulative_offset = 0
             for idx in pos_sorted[teleport_mask].index:
                 if idx > 0:
@@ -238,47 +429,26 @@ def add_corridor_info_to_events(
             continue
 
         df = df.copy().sort_values('time').reset_index(drop=True)
-
-        # Assign corridor IDs based on time
         df['corridor_id'] = np.nan
 
         for _, corridor in corridor_info.iterrows():
-            mask = (df['time'] >= corridor['start_time']) & \
-                   (df['time'] < corridor['end_time'])
+            mask = (df['time'] >= corridor['start_time']) & (df['time'] < corridor['end_time'])
             df.loc[mask, 'corridor_id'] = corridor['corridor_id']
 
-        # If has position, calculate global position
         if 'position' in df.columns and event_type != 'Position':
-            # For Cue_State and Cue_Result, positions are predefined cue locations
-            # They represent fixed positions in the virtual environment
-            # They should NOT get cumulative offset - only corridor offset
             if event_type in ['Cue State', 'Cue_State', 'Cue Result', 'Cue_Result']:
-                # Convert to cm
                 df['position_cm'] = df['position'] / 250.0
-
-                # Global position for cues: just corridor offset + position
-                # NO cumulative offset because cues are fixed in virtual space
                 mask = ~df['corridor_id'].isna()
                 df.loc[mask, 'global_position_cm'] = (
-                    df.loc[mask, 'corridor_id'] * corridor_length_cm +
-                    df.loc[mask, 'position_cm']
+                    df.loc[mask, 'corridor_id'] * corridor_length_cm + df.loc[mask, 'position_cm']
                 )
             else:
-                # For other events with position, apply cumulative offset
                 df['cumulative_offset'] = 0
-
                 for tel_time, offset in teleport_offsets.items():
-                    # Apply offset to all events after this teleport
                     df.loc[df['time'] >= tel_time, 'cumulative_offset'] = offset
-
-                # Add offset to position before converting
                 df['cumulative_position'] = df['position'] + df['cumulative_offset']
-
-                # Convert to cm
                 df['position_cm'] = df['position'] / 250.0
                 df['global_position_cm'] = df['cumulative_position'] / 250.0
-
-                # Drop helper columns
                 df = df.drop(columns=['cumulative_offset', 'cumulative_position'], errors='ignore')
 
         updated[event_type] = df

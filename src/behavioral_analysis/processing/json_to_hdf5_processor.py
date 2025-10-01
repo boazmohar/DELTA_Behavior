@@ -130,16 +130,23 @@ def process_json_to_hdf5(
     if cue_state_key is None:
         raise ValueError("Input data must contain Cue State events for corridor detection")
 
-    # Get cue and position data
+    # Get cue, position, and result data
     cue_df = dataframes[cue_state_key]
     position_df = dataframes.get('Position')
+
+    cue_result_df = None
+    for candidate in ('Cue_Result', 'Cue Result'):
+        if candidate in dataframes:
+            cue_result_df = dataframes[candidate]
+            break
 
     # Detect corridors using simple cue ID counting
     corridor_info, position_with_corridors = detect_corridors_simple(
         cue_df,
         position_df,
         corridor_length_cm=corridor_length_cm,
-        verbose=verbose
+        verbose=verbose,
+        cue_result_df=cue_result_df,
     )
 
     # Add corridor and global position information to all events

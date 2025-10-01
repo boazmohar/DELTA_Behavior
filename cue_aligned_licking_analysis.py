@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""
-Create cue-aligned licking analysis where 0 = cue position
-Bins licks in 5cm intervals relative to each cue
-"""
+"""Create cue-aligned licking analysis where 0 = cue position."""
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+from __future__ import annotations
+
+import argparse
 from pathlib import Path
 
-def create_cue_aligned_licking_analysis():
-    # Load the data from HDF5
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+
+def create_cue_aligned_licking_analysis(hdf5_path: Path, output_dir: Path):
     print("Loading data from HDF5...")
-    with pd.HDFStore('behavioral_analysis/output', 'r') as store:
+    if not hdf5_path.exists():
+        raise FileNotFoundError(f"HDF5 file not found: {hdf5_path}")
+
+    with pd.HDFStore(str(hdf5_path), 'r') as store:
         trials_df = store['events/Trials']
         position_df = store['events/Position']
         lick_df = store['events/Lick']
@@ -115,11 +119,13 @@ def create_cue_aligned_licking_analysis():
     ax2.set_xlim(-50, 100)
 
     plt.tight_layout()
-    plt.savefig('cue_aligned_licking_rate.png', dpi=150, bbox_inches='tight')
-    print("Saved cue-aligned licking rate plot to cue_aligned_licking_rate.png")
+    rate_plot = output_dir / 'cue_aligned_licking_rate.png'
+    plt.savefig(rate_plot, dpi=150, bbox_inches='tight')
+    print(f"Saved cue-aligned licking rate plot to {rate_plot}")
 
     # Create a summary statistics file
-    with open('cue_aligned_licking_stats.txt', 'w') as f:
+    stats_path = output_dir / 'cue_aligned_licking_stats.txt'
+    with stats_path.open('w') as f:
         f.write("Cue-Aligned Licking Analysis Summary\n")
         f.write("=" * 50 + "\n\n")
         f.write(f"Total trials analyzed: {len(trials_df)}\n")
@@ -159,7 +165,7 @@ def create_cue_aligned_licking_analysis():
         f.write(f"  Pre-cue licking (<0 cm): {unrewarded_rate[pre_cue_mask].sum():.2f} licks/trial\n")
         f.write(f"  Post-cue licking (≥0 cm): {unrewarded_rate[post_cue_mask].sum():.2f} licks/trial\n")
 
-    print("Saved analysis summary to cue_aligned_licking_stats.txt")
+    print(f"Saved analysis summary to {stats_path}")
 
     # Also create a raw count version
     fig2, (ax3, ax4) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
@@ -190,11 +196,34 @@ def create_cue_aligned_licking_analysis():
     ax4.set_xlim(-50, 100)
 
     plt.tight_layout()
-    plt.savefig('cue_aligned_licking_counts.png', dpi=150, bbox_inches='tight')
-    print("Saved cue-aligned licking counts plot to cue_aligned_licking_counts.png")
+    counts_plot = output_dir / 'cue_aligned_licking_counts.png'
+    plt.savefig(counts_plot, dpi=150, bbox_inches='tight')
+    print(f"Saved cue-aligned licking counts plot to {counts_plot}")
 
     return rewarded_rate, unrewarded_rate, bin_centers
 
-if __name__ == "__main__":
-    rewarded_rate, unrewarded_rate, bin_centers = create_cue_aligned_licking_analysis()
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("hdf5_path", type=Path, help="Processed HDF5 file containing trials." )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Directory for analysis outputs (default: alongside the HDF5 file).",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    output_dir = args.output_dir or args.hdf5_path.parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    create_cue_aligned_licking_analysis(args.hdf5_path, output_dir)
     print("\nAnalysis complete!")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

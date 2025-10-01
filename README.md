@@ -17,25 +17,28 @@ This repository contains tools for handling behavioral data from the DELTA exper
 
 ```
 DELTA_Behavior/
-├── behavioral_analysis/          # Main package
-│   ├── __init__.py
-│   ├── io/                       # Input/Output functionality
-│   │   ├── __init__.py
-│   │   ├── json_parser.py        # JSON parsing functions
-│   │   ├── dataframe_builder.py  # DataFrame conversion
-│   │   └── hdf5_writer.py        # HDF5 saving/loading
-│   ├── processing/               # Data processing
-│   │   ├── __init__.py
-│   │   ├── corridor_detector_simple.py  # Simplified corridor detection
-│   │   ├── trial_matcher.py             # Robust trial matching
-│   │   └── json_to_hdf5_processor.py    # Main processing pipeline
-│   └── visualization/            # Data visualization
+├── src/
+│   └── behavioral_analysis/      # Main package
 │       ├── __init__.py
-│       └── trial_visualizer.py   # Comprehensive plotting functions
+│       ├── io/                   # Input/Output functionality
+│       ├── processing/           # Data processing pipeline
+│       └── visualization/        # Plotting helpers
+├── tests/                        # Integration-style scripts & checks
+│   └── test_visualizations.py
+├── notebooks/                    # (Add exploratory notebooks here)
+├── outputs/                      # Generated artifacts (ignored by git)
+├── run_one_animal.py             # Example processing script
+├── process_and_analyze.py        # Minimal processing CLI
 └── README.md                     # This file
 ```
 
 ## Quick Start
+
+Add the `src/` directory to your `PYTHONPATH` (or install the package) before importing:
+
+```bash
+export PYTHONPATH="$(pwd)/src:${PYTHONPATH}"
+```
 
 ### Basic Usage
 
@@ -50,6 +53,27 @@ result = process_json_to_hdf5(
     include_trials=True,  # Create trial dataframe
     verbose=True
 )
+```
+
+### Command-Line Helpers
+
+Scripts in the repository expose the same functionality without hard-coded paths:
+
+```bash
+# Convert one or more JSON logs to HDF5 (outputs derive from each filename)
+python run_one_animal.py /path/to/Log*.json --output-dir outputs/hdf5
+
+# Lightweight converter (trials disabled by default for faster batch runs)
+python process_and_analyze.py /path/to/Log*.json --output-dir outputs/raw
+
+# Generate visual summaries for a processed session
+python process_BM35_complete.py /path/to/Log.json --output-dir outputs/session_summary
+
+# Build cue-aligned licking analysis from any processed HDF5
+python cue_aligned_licking_analysis.py outputs/hdf5/Log.h5 --output-dir outputs/licking_analysis
+
+# Produce figures/PDF from existing artifacts
+python tests/test_visualizations.py outputs/hdf5/Log.h5 --trials-csv outputs/hdf5/Log_trials.csv
 ```
 
 ### Accessing the Processed Data

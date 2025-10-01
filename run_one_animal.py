@@ -1,70 +1,141 @@
 #!/usr/bin/env python3
-"""
-Test the final package with all functionality.
-"""
+"""Process one or more DELTA JSON logs into HDF5 files."""
 
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
 import sys
-sys.path.insert(0, '/groups/spruston/home/moharb/DELTA_Behavior')
 
-from behavioral_analysis.processing.json_to_hdf5_processor import process_json_to_hdf5
 import pandas as pd
 
-# Input file
-json_file = "/groups/spruston/sprustonlab/mesoscope-data/BM35/2025_09_17/1/Log BM35 2025-09-17 session 1.json"
-output_file = "BM35_final.h5"
 
-print("=== TESTING FINAL PACKAGE ===\n")
-print(f"Processing: {json_file}")
+REPO_ROOT = Path(__file__).resolve().parent
+SRC_PATH = REPO_ROOT / "src"
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
 
-# Process with all features enabled
-result = process_json_to_hdf5(
-    input_file=json_file,
-    output_file=output_file,
-    corridor_length_cm=200.0,
-    include_combined=False,
-    include_trials=True,  # Create trial dataframe
-    enable_monotonic_position=True,
-    overwrite=True,
-    verbose=True
-)
+from behavioral_analysis.processing.json_to_hdf5_processor import process_json_to_hdf5
 
-print(f"\n✓ Processing complete: {result}")
 
-# Verify output
-print("\n=== VERIFICATION ===")
-with pd.HDFStore(output_file, 'r') as store:
-    # Check available datasets
-    print("\nAvailable datasets:")
-    for key in store.keys():
-        df = store[key]
-        print(f"  {key}: {df.shape}")
+def derive_output_paths(json_path: Path, output_dir: Path, csv_dir: Path) -> tuple[Path, Path]:
+    stem = json_path.stem
+    return output_dir / f"{stem}.h5", csv_dir / f"{stem}_trials.csv"
 
-    # Check trials specifically
-    if '/events/Trials' in store:
-        trials = store['/events/Trials']
 
-        print(f"\n✓ Trials dataframe: {len(trials)} trials")
-        print(f"  Columns: {list(trials.columns)}")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "json_files",
+        nargs="+",
+        type=Path,
+        help="One or more Unity JSON log files to process.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=REPO_ROOT / "outputs",
+        help="Directory where HDF5 files will be written (default: ./outputs).",
+    )
+    parser.add_argument(
+        "--csv-dir",
+        type=Path,
+        default=None,
+        help="Directory for exported trials CSV files (default: same as output-dir).",
+    )
+    parser.add_argument(
+        "--corridor-length",
+        type=float,
+        default=200.0,
+        help="Corridor length in cm for global position calculations.",
+    )
+    parser.add_argument(
+        "--no-trials",
+        action="store_true",
+        help="Disable trial DataFrame creation to speed up processing.",
+    )
+    parser.add_argument(
+        "--skip-verify",
+        action="store_true",
+        help="Skip post-processing inspection of the generated HDF5.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Reduce console output from the processing pipeline.",
+    )
+    return parser.parse_args()
 
-        # Check for required columns
-        required = ['trial_id', 'corridor', 'outcome', 'is_rewarding', 'global_position_cm']
-        missing = [col for col in required if col not in trials.columns]
-        if missing:
-            print(f"  ⚠ Missing columns: {missing}")
-        else:
-            print(f"  ✓ All required columns present")
 
-        # Check outcomes
-        print(f"\n  Outcome breakdown:")
-        for outcome, count in trials['outcome'].value_counts().items():
-            print(f"    {outcome}: {count} ({count/len(trials)*100:.1f}%)")
+def verify_output(hdf5_path: Path, csv_path: Path, include_trials: bool) -> None:
+    print("\n=== VERIFICATION ===")
+    with pd.HDFStore(str(hdf5_path), "r") as store:
+        print("\nAvailable datasets:")
+        for key in store.keys():
+            df = store[key]
+            print(f"  {key}: {df.shape}")
 
-        # Check trial IDs
-        if 'trial_id' in trials.columns:
-            print(f"\n  ✓ Trial IDs: {trials['trial_id'].min()} to {trials['trial_id'].max()}")
-            if (trials['trial_id'] == range(len(trials))).all():
-                print(f"  ✓ Trial IDs are sequential (0 to {len(trials)-1})")
+        if include_trials and "/events/Trials" in store:
+            trials = store["/events/Trials"]
+            print(f"\n✓ Trials dataframe: {len(trials)} trials")
+            print(f"  Columns: {list(trials.columns)}")
 
-        # Save to CSV
-        trials.to_csv('trials_BM35_package_final.csv', index=False)
-        print(f"\n  ✓ Saved to: trials_BM35_package_final.csv")
+            required = ["trial_id", "corridor", "outcome", "is_rewarding", "global_position_cm"]
+            missing = [col for col in required if col not in trials.columns]
+            if missing:
+                print(f"  ⚠ Missing columns: {missing}")
+            else:
+                print("  ✓ All required columns present")
+
+            print("\n  Outcome breakdown:")
+            for outcome, count in trials["outcome"].value_counts().items():
+                print(f"    {outcome}: {count} ({count / len(trials) * 100:.1f}%)")
+
+            if "trial_id" in trials.columns:
+                print(f"\n  ✓ Trial IDs: {trials['trial_id'].min()} to {trials['trial_id'].max()}")
+
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            trials.to_csv(csv_path, index=False)
+            print(f"\n  ✓ Saved trials CSV to: {csv_path}")
+
+
+def main() -> int:
+    args = parse_args()
+
+    output_dir = args.output_dir
+    csv_dir = args.csv_dir or output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
+    for json_path in args.json_files:
+        if not json_path.exists():
+            print(f"✗ Skipping missing file: {json_path}")
+            continue
+
+        hdf5_path, csv_path = derive_output_paths(json_path, output_dir, csv_dir)
+
+        print("=" * 60)
+        print(f"Processing {json_path}")
+        print("=" * 60)
+
+        result = process_json_to_hdf5(
+            input_file=str(json_path),
+            output_file=str(hdf5_path),
+            corridor_length_cm=args.corridor_length,
+            include_combined=False,
+            include_trials=not args.no_trials,
+            enable_monotonic_position=True,
+            overwrite=True,
+            verbose=not args.quiet,
+        )
+
+        print(f"\n✓ Processing complete: {result}")
+
+        if not args.skip_verify:
+            verify_output(hdf5_path, csv_path, include_trials=not args.no_trials)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

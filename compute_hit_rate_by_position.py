@@ -12,11 +12,8 @@ from __future__ import annotations
 
 import argparse
 from importlib import util as importlib_util
-import json
-import math
 import pathlib
-from collections import defaultdict
-from typing import Dict, Iterable, List, Tuple
+from typing import Iterable, List
 
 _matplotlib_spec = importlib_util.find_spec("matplotlib")
 if _matplotlib_spec is not None:
@@ -24,76 +21,35 @@ if _matplotlib_spec is not None:
 else:
     plt = None  # type: ignore
 
-CueResult = Dict[str, object]
-
-
-def load_cue_results(path: pathlib.Path) -> List[CueResult]:
-    """Return the list of cue result dictionaries from the Unity log."""
-    with path.open("r", encoding="utf-8") as fh:
-        log_entries = json.load(fh)
-
-    cue_results: List[CueResult] = []
-    for entry in log_entries:
-        if entry.get("msg") == "Cue Result":
-            cue_results.append(entry["data"])
-    return cue_results
-
-
-def aggregate_hit_rates(
-    cue_results: Iterable[CueResult], bin_size: int
-) -> List[Tuple[int, int, int, float]]:
-    """Aggregate cue hits by the cue's original corridor position.
-
-    Args:
-        cue_results: Iterator of cue result dictionaries from the log.
-        bin_size: Width of the position bins.
-
-    Returns:
-        A list of tuples of the form (bin_start, hits, total, hit_rate)
-        sorted by bin_start.
-    """
-
-    stats: Dict[int, Dict[str, int]] = defaultdict(lambda: {"hits": 0, "total": 0})
-
-    for cue in cue_results:
-        position = int(cue["position"])
-        bin_start = (position // bin_size) * bin_size
-        stats[bin_start]["total"] += 1
-        if cue.get("hasGivenReward"):
-            stats[bin_start]["hits"] += 1
-
-    aggregated: List[Tuple[int, int, int, float]] = []
-    for bin_start, counts in stats.items():
-        total = counts["total"]
-        hits = counts["hits"]
-        hit_rate = hits / total if total else math.nan
-        aggregated.append((bin_start, hits, total, hit_rate))
-
-    aggregated.sort(key=lambda row: row[0])
-    return aggregated
+from behavioral_analysis.analysis.corridor_metrics import (
+    HitRateBin,
+    compute_hit_rates_by_position,
+    load_log_entries,
+)
 
 
 def write_summary_table(
-    aggregated: List[Tuple[int, int, int, float]], output_path: pathlib.Path
+    aggregated: Iterable[HitRateBin], output_path: pathlib.Path
 ) -> None:
     """Write the aggregated hit-rate table to a TSV file."""
 
     with output_path.open("w", encoding="utf-8") as fh:
         fh.write("position_bin_start\thits\ttotal\thit_rate\n")
-        for bin_start, hits, total, hit_rate in aggregated:
-            fh.write(f"{bin_start}\t{hits}\t{total}\t{hit_rate:.3f}\n")
+        for bin_stats in aggregated:
+            fh.write(
+                f"{bin_stats.bin_start}\t{bin_stats.hits}\t"
+                f"{bin_stats.total}\t{bin_stats.hit_rate:.3f}\n"
+            )
 
 
-def plot_hit_rate(
-    aggregated: List[Tuple[int, int, int, float]], output_path: pathlib.Path
-) -> None:
+def plot_hit_rate(aggregated: List[HitRateBin], output_path: pathlib.Path) -> None:
     """Save a line plot of hit rate vs. original position when possible."""
 
     if plt is None:
         raise RuntimeError("matplotlib is not available in this environment.")
 
-    positions = [row[0] for row in aggregated]
-    hit_rates = [row[3] for row in aggregated]
+    positions = [row.bin_start for row in aggregated]
+    hit_rates = [row.hit_rate for row in aggregated]
 
     plt.figure(figsize=(10, 4))
     plt.plot(positions, hit_rates, marker="o", linestyle="-", linewidth=1.5)
@@ -140,12 +96,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     log_path: pathlib.Path = args.log_path
-    cue_results = load_cue_results(log_path)
-
-    if not cue_results:
-        raise SystemExit("No cue results found in the provided log file.")
-
-    aggregated = aggregate_hit_rates(cue_results, args.bin_size)
+    log_entries = load_log_entries(log_path)
+    try:
+        aggregated = compute_hit_rates_by_position(log_entries, args.bin_size)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
     if args.output_prefix is None:
         output_prefix = log_path.with_suffix("")

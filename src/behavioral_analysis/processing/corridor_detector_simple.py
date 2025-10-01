@@ -13,7 +13,7 @@ from typing import Tuple, Optional, Dict
 def detect_corridors_simple(
     cue_df: pd.DataFrame,
     position_df: Optional[pd.DataFrame] = None,
-    corridor_length_cm: float = 200.0,
+    corridor_length_cm: float = 500.0,
     verbose: bool = True
 ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
     """
@@ -88,7 +88,7 @@ def detect_corridors_simple(
 def add_corridor_to_position(
     position_df: pd.DataFrame,
     corridor_info: pd.DataFrame,
-    corridor_length_cm: float = 200.0,
+    corridor_length_cm: float = 500.0,
     verbose: bool = True
 ) -> pd.DataFrame:
     """
@@ -150,12 +150,12 @@ def add_corridor_to_position(
             print(f"  Detected {len(teleport_indices)} teleports, created cumulative position")
 
     # Now convert cumulative position to cm
-    # Using the original conversion factor: 50000 units = 200 cm
+    # Using the original conversion factor: 50000 units = 500 cm
     position_df['position_cm'] = position_df['position'] / 250.0
     position_df['cumulative_position_cm'] = position_df['cumulative_position'] / 250.0
 
     # Calculate global position using corridor offset and cumulative position
-    # For corridor 1 (id=0), offset is 0; for corridor 2 (id=1), offset is 200cm, etc.
+    # For corridor 1 (id=0), offset is 0; for corridor 2 (id=1), offset is 500cm, etc.
     mask = ~position_df['corridor_id'].isna()
 
     # Use cumulative position for events within corridors
@@ -191,7 +191,7 @@ def add_corridor_to_position(
 def add_corridor_info_to_events(
     dataframes: Dict[str, pd.DataFrame],
     corridor_info: pd.DataFrame,
-    corridor_length_cm: float = 200.0,
+    corridor_length_cm: float = 500.0,
     verbose: bool = True,
     position_df: Optional[pd.DataFrame] = None
 ) -> Dict[str, pd.DataFrame]:

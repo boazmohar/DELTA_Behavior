@@ -46,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--corridor-length",
         type=float,
-        default=200.0,
+        default=500.0,
         help="Corridor length in cm for global position calculations.",
     )
     parser.add_argument(

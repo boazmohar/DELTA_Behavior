@@ -83,7 +83,7 @@ def match_cues_robust(
 def create_trial_dataframe(
     cue_state_df: pd.DataFrame,
     cue_result_df: pd.DataFrame,
-    corridor_length_cm: float = 200.0,
+    corridor_length_cm: float = 500.0,
     verbose: bool = True,
     position_df: pd.DataFrame = None
 ) -> pd.DataFrame:

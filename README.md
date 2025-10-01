@@ -49,7 +49,7 @@ from behavioral_analysis.processing import process_json_to_hdf5
 result = process_json_to_hdf5(
     input_file="path/to/data.json",
     output_file="output.h5",
-    corridor_length_cm=200.0,
+    corridor_length_cm=500.0,
     include_trials=True,  # Create trial dataframe
     verbose=True
 )
@@ -108,10 +108,10 @@ Corridors are detected based on the cycling of Cue_State IDs (0-6):
 
 Global position is calculated using a simple formula:
 ```
-global_position_cm = (corridor_id - 1) * 200 + position_cm
+global_position_cm = (corridor_id - 1) * 500 + position_cm
 ```
 - Corridor 1 starts at global position 0 cm
-- Each corridor adds 200 cm to the global position
+- Each corridor adds 500 cm to the global position
 - Consistent reference frame across all events
 
 ### 3. Robust Trial Matching
@@ -300,8 +300,8 @@ python -m behavioral_analysis.visualization.trial_visualizer data.h5 --csv trial
 ## Position Units and Conversion
 
 - **Arbitrary units**: Raw position values range from 0 to 50,000
-- **Conversion factor**: 250 (50,000 AU = 200 cm)
-- **Corridor length**: 200 cm
+- **Conversion factor**: 250 (50,000 AU = 500 cm)
+- **Corridor length**: 500 cm
 - **Position formula**: `position_cm = position_AU / 250`
 
 ## Processing Pipeline
@@ -322,7 +322,7 @@ python -m behavioral_analysis.visualization.trial_visualizer data.h5 --csv trial
 process_json_to_hdf5(
     input_file: str,
     output_file: Optional[str] = None,
-    corridor_length_cm: float = 200.0,
+    corridor_length_cm: float = 500.0,
     include_combined: bool = False,
     include_trials: bool = True,
     enable_monotonic_position: bool = True,
@@ -335,7 +335,7 @@ process_json_to_hdf5(
 **Parameters:**
 - `input_file`: Path to input JSON file
 - `output_file`: Path for output HDF5 (default: auto-generated)
-- `corridor_length_cm`: Length of each corridor (default: 200)
+- `corridor_length_cm`: Length of each corridor (default: 500)
 - `include_combined`: Include combined DataFrame (default: False)
 - `include_trials`: Create trial-based dataframe (default: True)
 - `enable_monotonic_position`: Ensure monotonic global positions (default: True)
@@ -356,12 +356,12 @@ from behavioral_analysis.processing import (
 
 # Detect corridors from Cue_State events
 corridor_info, position_with_corridors = detect_corridors_simple(
-    cue_state_df, position_df, corridor_length_cm=200.0
+    cue_state_df, position_df, corridor_length_cm=500.0
 )
 
 # Create trial dataframe
 trials_df = create_trial_dataframe(
-    cue_state_df, cue_result_df, corridor_length_cm=200.0
+    cue_state_df, cue_result_df, corridor_length_cm=500.0
 )
 
 # Calculate performance metrics

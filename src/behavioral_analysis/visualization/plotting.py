@@ -539,7 +539,7 @@ def plot_corridor_summary(position_df: pd.DataFrame,
     corridor_data = corridor_row.iloc[0]
     corridor_start_time = corridor_data['start_time']
     corridor_end_time = corridor_data['end_time']
-    corridor_length = corridor_data.get('length_cm', 200)  # Default to 200 cm
+    corridor_length = corridor_data.get('length_cm', 500)  # Default to 500 cm
 
     # Filter data for this corridor
     if corridor_column in position_df.columns:
@@ -609,7 +609,7 @@ def plot_corridor_summary(position_df: pd.DataFrame,
                     # May need to scale or transform
                     x_pos = cue['position']
                     if x_pos > 1000:  # Likely in arbitrary units
-                        # Convert to cm (assuming 50,000 units = 200 cm)
+                        # Convert to cm (assuming 50,000 units = 500 cm)
                         x_pos = x_pos / (50000 / corridor_length)
                 else:
                     # Skip if no position info

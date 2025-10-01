@@ -36,7 +36,7 @@ from behavioral_analysis.processing.trial_matcher import create_trial_dataframe,
 def process_json_to_hdf5(
     input_file: str,
     output_file: Optional[str] = None,
-    corridor_length_cm: float = 200.0,
+    corridor_length_cm: float = 500.0,
     include_combined: bool = False,
     include_trials: bool = True,
     enable_monotonic_position: bool = True,
@@ -57,7 +57,7 @@ def process_json_to_hdf5(
     Args:
         input_file: Path to the input JSON file
         output_file: Path for the output HDF5 file (default: derived from input file)
-        corridor_length_cm: Length of corridors in centimeters (default: 200 cm)
+        corridor_length_cm: Length of corridors in centimeters (default: 500 cm)
         include_combined: Whether to include combined events DataFrame (default: False)
         include_trials: Whether to create trial-based dataframe (default: True)
         enable_monotonic_position: Whether to add monotonic global position (default: True)
@@ -259,7 +259,7 @@ def main():
                         help='Do not overwrite existing output file')
 
     # Processing options
-    parser.add_argument('--corridor-length', type=float, default=200.0,
+    parser.add_argument('--corridor-length', type=float, default=500.0,
                         help='Length of each corridor in centimeters')
     parser.add_argument('--disable-monotonic-position',
                         action='store_true',

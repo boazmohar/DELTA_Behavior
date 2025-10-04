@@ -159,5 +159,5 @@ def test_cue_global_position_matches_offset():
 
     for _, row in cue_results_labeled.iterrows():
         cid = int(row['corridor_id'])
-        expected = offsets[cid] + row['position'] / 250.0
+        expected = offsets[cid] + row['position'] / 100.0
         assert abs(row['global_position_cm'] - expected) < 1e-6

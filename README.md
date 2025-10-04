@@ -300,9 +300,9 @@ python -m behavioral_analysis.visualization.trial_visualizer data.h5 --csv trial
 ## Position Units and Conversion
 
 - **Arbitrary units**: Raw position values range from 0 to 50,000
-- **Conversion factor**: 250 (50,000 AU = 500 cm)
+- **Conversion factor**: 100 (50,000 AU = 500 cm)
 - **Corridor length**: 500 cm
-- **Position formula**: `position_cm = position_AU / 250`
+- **Position formula**: `position_cm = position_AU / 100`
 
 ## Processing Pipeline
 

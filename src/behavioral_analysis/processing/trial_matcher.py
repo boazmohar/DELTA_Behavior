@@ -121,8 +121,8 @@ def create_trial_dataframe(
     cue_state_df['cue_corridor'] = cue_state_corridors
 
     # Convert positions to cm
-    cue_state_df['position_cm'] = cue_state_df['position'] / 250.0
-    cue_result_df['position_cm'] = cue_result_df['position'] / 250.0
+    cue_state_df['position_cm'] = cue_state_df['position'] / 100.0
+    cue_result_df['position_cm'] = cue_result_df['position'] / 100.0
 
     # Calculate global position
     cue_state_df['cue_global_position_cm'] = (

@@ -60,7 +60,7 @@ def test_aggregate_hit_rates_ignores_invalid_positions() -> None:
         {"position": None, "hasGivenReward": False},
     ]
 
-    aggregated = aggregate_hit_rates(cue_results, bin_size=250)
+    aggregated = aggregate_hit_rates(cue_results, bin_size=100)
 
     assert aggregated == [
         HitRateBin(bin_start=500, hits=1, total=1, hit_rate=1.0),

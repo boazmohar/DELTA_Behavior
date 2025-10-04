@@ -386,9 +386,9 @@ def summarize_corridor_info(
     base['end_time'] = base['end_time'] + epsilon
 
     base['duration_ms'] = base['end_time'] - base['start_time']
-    base['start_position_cm'] = base['start_position'] / 250.0
-    base['end_position_cm'] = base['end_position'] / 250.0
-    base['max_position_cm'] = base['max_position'] / 250.0
+    base['start_position_cm'] = base['start_position'] / 100.0
+    base['end_position_cm'] = base['end_position'] / 100.0
+    base['max_position_cm'] = base['max_position'] / 100.0
     base['trigger'] = np.where(base['corridor_id'] == 0, 'first_cue', 'cue_reset')
 
     if not cue_result_df.empty:
@@ -550,8 +550,8 @@ def add_corridor_to_position(
         if verbose:
             print(f"  Detected {len(teleport_indices)} teleports, created cumulative position")
 
-    position_df['position_cm'] = position_df['position'] / 250.0
-    position_df['cumulative_position_cm'] = position_df['cumulative_position'] / 250.0
+    position_df['position_cm'] = position_df['position'] / 100.0
+    position_df['cumulative_position_cm'] = position_df['cumulative_position'] / 100.0
 
     mask = ~position_df['corridor_id'].isna()
     position_df.loc[mask, 'global_position_cm'] = position_df.loc[mask, 'cumulative_position_cm']
@@ -617,7 +617,7 @@ def add_corridor_info_to_events(
 
         if 'position' in df.columns and event_type != 'Position':
             if event_type in ['Cue State', 'Cue_State', 'Cue Result', 'Cue_Result']:
-                df['position_cm'] = df['position'] / 250.0
+                df['position_cm'] = df['position'] / 100.0
                 mask = ~df['corridor_id'].isna()
                 df.loc[mask, 'global_position_cm'] = (
                     df.loc[mask, 'corridor_id'] * corridor_length_cm + df.loc[mask, 'position_cm']
@@ -627,8 +627,8 @@ def add_corridor_info_to_events(
                 for tel_time, offset in teleport_offsets.items():
                     df.loc[df['time'] >= tel_time, 'cumulative_offset'] = offset
                 df['cumulative_position'] = df['position'] + df['cumulative_offset']
-                df['position_cm'] = df['position'] / 250.0
-                df['global_position_cm'] = df['cumulative_position'] / 250.0
+                df['position_cm'] = df['position'] / 100.0
+                df['global_position_cm'] = df['cumulative_position'] / 100.0
                 df = df.drop(columns=['cumulative_offset', 'cumulative_position'], errors='ignore')
 
         updated[event_type] = df

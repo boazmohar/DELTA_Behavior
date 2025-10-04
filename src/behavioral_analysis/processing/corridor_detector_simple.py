@@ -33,6 +33,22 @@ def _ensure_dataframe(df: Optional[pd.DataFrame]) -> pd.DataFrame:
     return df.copy()
 
 
+def _nanmin(*series: pd.Series) -> pd.Series:
+    if not series:
+        return pd.Series(dtype=float)
+    concat = pd.concat(series, axis=1)
+    values = concat.to_numpy(dtype=float)
+    return pd.Series(np.nanmin(values, axis=1), index=concat.index)
+
+
+def _nanmax(*series: pd.Series) -> pd.Series:
+    if not series:
+        return pd.Series(dtype=float)
+    concat = pd.concat(series, axis=1)
+    values = concat.to_numpy(dtype=float)
+    return pd.Series(np.nanmax(values, axis=1), index=concat.index)
+
+
 def annotate_cue_states_with_corridors(cue_state_df: Optional[pd.DataFrame]) -> pd.DataFrame:
     """Add `corridor_id`/`cue_index` columns to Cue_State events."""
 
@@ -248,27 +264,86 @@ def summarize_corridor_info(
         return base
 
     base = base.sort_values('corridor_id').reset_index(drop=True)
-    base['duration_ms'] = base['end_time'] - base['start_time']
-    base['start_position_cm'] = base['start_position'] / 250.0
-    base['end_position_cm'] = base['end_position'] / 250.0
-    base['max_position_cm'] = base['max_position'] / 250.0
-    base['trigger'] = np.where(base['corridor_id'] == 0, 'first_loop', 'loop_reset')
 
-    if not cue_result_df.empty:
-        stats = cue_result_df.groupby('corridor_id').agg(
-            num_cue_results=('id', 'count'),
-            first_cue_time=('time', 'min'),
-            last_cue_time=('time', 'max'),
+    state_stats = pd.DataFrame()
+    if not cue_state_df.empty:
+        state_stats = cue_state_df.groupby('corridor_id')['time'].agg(
+            first_state_time='min',
+            last_state_time='max',
         )
-        base = base.merge(stats, on='corridor_id', how='left')
+    if not state_stats.empty:
+        base = base.merge(state_stats, on='corridor_id', how='left')
 
+    result_stats = pd.DataFrame()
+    if not cue_result_df.empty:
+        result_stats = cue_result_df.groupby('corridor_id')['time'].agg(
+            first_cue_time='min',
+            last_cue_time='max',
+        )
+    if not result_stats.empty:
+        base = base.merge(result_stats, on='corridor_id', how='left')
+
+    match_stats = pd.DataFrame()
     if not cue_matches.empty:
         match_stats = cue_matches.groupby('corridor_id').agg(
             num_matched_cues=('cue_id', 'count'),
             first_match_time=('result_time', 'min'),
             last_match_time=('result_time', 'max'),
         )
+    if not match_stats.empty:
         base = base.merge(match_stats, on='corridor_id', how='left')
+
+    # Ensure start/end times cover all cue events
+    start_candidates = [base.get('start_time')]
+    if 'first_state_time' in base:
+        start_candidates.append(base['first_state_time'])
+    if 'first_cue_time' in base:
+        start_candidates.append(base['first_cue_time'])
+    if 'first_match_time' in base:
+        start_candidates.append(base['first_match_time'])
+    valid_start = [s for s in start_candidates if s is not None]
+    base['start_time'] = _nanmin(*valid_start) if valid_start else pd.Series(np.nan, index=base.index)
+
+    end_candidates = [base.get('end_time')]
+    if 'last_state_time' in base:
+        end_candidates.append(base['last_state_time'])
+    if 'last_cue_time' in base:
+        end_candidates.append(base['last_cue_time'])
+    if 'last_match_time' in base:
+        end_candidates.append(base['last_match_time'])
+    valid_end = [s for s in end_candidates if s is not None]
+    base['end_time'] = _nanmax(*valid_end) if valid_end else pd.Series(np.nan, index=base.index)
+
+    # Guard against missing data (e.g., synthetic tests with minimal info)
+    base['start_time'] = base['start_time'].fillna(0.0)
+    base['end_time'] = base['end_time'].fillna(base['start_time'])
+
+    # Add a tiny epsilon so strict < end comparisons keep the last event
+    epsilon = 1e-6
+    base['end_time'] = base['end_time'] + epsilon
+
+    # Keep corridor ordering sane relative to the next corridor start
+    for idx in range(len(base) - 1):
+        next_start = base.loc[idx + 1, 'start_time']
+        if pd.notna(next_start):
+            base.loc[idx, 'end_time'] = min(base.loc[idx, 'end_time'], next_start)
+
+    base['duration_ms'] = base['end_time'] - base['start_time']
+    base['start_position_cm'] = base['start_position'] / 250.0
+    base['end_position_cm'] = base['end_position'] / 250.0
+    base['max_position_cm'] = base['max_position'] / 250.0
+    base['trigger'] = np.where(base['corridor_id'] == 0, 'first_cue', 'cue_reset')
+
+    if not cue_result_df.empty:
+        counts = cue_result_df.groupby('corridor_id').agg(
+            num_cue_results=('id', 'count'),
+        )
+        base = base.merge(counts, on='corridor_id', how='left')
+    else:
+        base['num_cue_results'] = np.nan
+
+    if 'num_matched_cues' not in base:
+        base['num_matched_cues'] = np.nan
 
     return base
 
@@ -284,6 +359,10 @@ def compute_corridor_artifacts(
 
     if verbose:
         print("Detecting corridor structure...")
+
+    # Retained for API compatibility – corridor length is applied later when
+    # global positions are generated but isn't needed for the artifact summary.
+    _ = corridor_length_cm
 
     cue_state_with_corridors = annotate_cue_states_with_corridors(cue_state_df)
     cue_result_with_corridors = annotate_cue_results_with_corridors(cue_result_df)
@@ -405,7 +484,6 @@ def add_corridor_info_to_events(
 ) -> Dict[str, pd.DataFrame]:
     updated = {}
 
-    teleport_times: List[float] = []
     teleport_offsets: Dict[float, float] = {}
 
     if position_df is not None and 'Position' in dataframes:
@@ -420,7 +498,6 @@ def add_corridor_info_to_events(
                     tel_time = pos_sorted.loc[idx, 'time']
                     last_value_before = pos_sorted.loc[idx - 1, 'position']
                     cumulative_offset += last_value_before
-                    teleport_times.append(tel_time)
                     teleport_offsets[tel_time] = cumulative_offset
 
     for event_type, df in dataframes.items():
@@ -429,11 +506,16 @@ def add_corridor_info_to_events(
             continue
 
         df = df.copy().sort_values('time').reset_index(drop=True)
-        df['corridor_id'] = np.nan
 
-        for _, corridor in corridor_info.iterrows():
-            mask = (df['time'] >= corridor['start_time']) & (df['time'] < corridor['end_time'])
-            df.loc[mask, 'corridor_id'] = corridor['corridor_id']
+        if event_type in ['Cue State', 'Cue_State']:
+            df = annotate_cue_states_with_corridors(df)
+        elif event_type in ['Cue Result', 'Cue_Result']:
+            df = annotate_cue_results_with_corridors(df)
+        else:
+            df['corridor_id'] = np.nan
+            for _, corridor in corridor_info.iterrows():
+                mask = (df['time'] >= corridor['start_time']) & (df['time'] < corridor['end_time'])
+                df.loc[mask, 'corridor_id'] = corridor['corridor_id']
 
         if 'position' in df.columns and event_type != 'Position':
             if event_type in ['Cue State', 'Cue_State', 'Cue Result', 'Cue_Result']:

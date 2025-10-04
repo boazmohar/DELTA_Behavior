@@ -11,6 +11,7 @@ This module contains functions for processing behavioral data, including:
 from behavioral_analysis.processing.corridor_detector_simple import (
     CorridorComputationArtifacts,
     add_corridor_info_to_events,
+    add_corridor_to_position,
     annotate_cue_results_with_corridors,
     annotate_cue_states_with_corridors,
     compute_corridor_artifacts,
@@ -26,6 +27,7 @@ __all__ = [
     'CorridorComputationArtifacts',
     'detect_corridors_simple',
     'add_corridor_info_to_events',
+    'add_corridor_to_position',
     'annotate_cue_states_with_corridors',
     'annotate_cue_results_with_corridors',
     'compute_corridor_artifacts',

@@ -49,6 +49,66 @@ def _nanmax(*series: pd.Series) -> pd.Series:
     return pd.Series(np.nanmax(values, axis=1), index=concat.index)
 
 
+def _deduplicate_states_using_results(
+    cue_state_df: pd.DataFrame,
+    cue_result_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Drop Cue_State duplicates whose positions never appear in results."""
+
+    if cue_state_df.empty or cue_result_df.empty:
+        return cue_state_df
+
+    if 'corridor_id' not in cue_state_df or 'corridor_id' not in cue_result_df:
+        return cue_state_df
+
+    position_lookup = (
+        cue_result_df.groupby(['corridor_id', 'id'])['position']
+        .apply(lambda s: set(s.dropna().tolist()))
+        .to_dict()
+    )
+
+    def filter_group(group: pd.DataFrame) -> pd.DataFrame:
+        key = (group['corridor_id'].iloc[0], group['id'].iloc[0])
+        valid_positions = position_lookup.get(key)
+        if valid_positions:
+            filtered = group[group['position'].isin(valid_positions)]
+            if not filtered.empty:
+                return filtered
+        return group
+
+    return cue_state_df.groupby(['corridor_id', 'id'], group_keys=False).apply(filter_group)
+
+
+def _deduplicate_results_using_states(
+    cue_result_df: pd.DataFrame,
+    cue_state_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Drop Cue_Result duplicates whose positions are not present in states."""
+
+    if cue_result_df.empty or cue_state_df.empty:
+        return cue_result_df
+
+    if 'corridor_id' not in cue_result_df or 'corridor_id' not in cue_state_df:
+        return cue_result_df
+
+    state_positions_map = (
+        cue_state_df.groupby(['corridor_id', 'id'])['position']
+        .apply(lambda s: set(s.dropna().tolist()))
+        .to_dict()
+    )
+
+    def filter_group(group: pd.DataFrame) -> pd.DataFrame:
+        key = (group['corridor_id'].iloc[0], group['id'].iloc[0])
+        valid_positions = state_positions_map.get(key)
+        if valid_positions:
+            filtered = group[group['position'].isin(valid_positions)]
+            if not filtered.empty:
+                return filtered
+        return group
+
+    return cue_result_df.groupby(['corridor_id', 'id'], group_keys=False).apply(filter_group)
+
+
 def annotate_cue_states_with_corridors(cue_state_df: Optional[pd.DataFrame]) -> pd.DataFrame:
     """Add `corridor_id`/`cue_index` columns to Cue_State events."""
 
@@ -131,7 +191,8 @@ def match_cue_states_to_results(
             {
                 'state_idx': match.get('state_idx'),
                 'result_idx': match.get('result_idx'),
-                'corridor_id': result.get('corridor_id', np.nan),
+                'corridor_id': state.get('corridor_id', np.nan),
+                'result_corridor': result.get('corridor_id', np.nan),
                 'cue_id': state.get('id', np.nan),
                 'state_time': state_time,
                 'result_time': result_time,
@@ -142,6 +203,7 @@ def match_cue_states_to_results(
                 'num_licks_reward': result.get('numLicksInReward'),
                 'num_licks_pre': result.get('numLicksInPre'),
                 'reaction_time_ms': result_time - state_time if None not in (state_time, result_time) else np.nan,
+                'state_corridor': state.get('corridor_id', np.nan),
             }
         )
 
@@ -247,6 +309,7 @@ def summarize_corridor_info(
     cue_state_df: pd.DataFrame,
     cue_result_df: Optional[pd.DataFrame] = None,
     cue_matches: Optional[pd.DataFrame] = None,
+    corridor_length_cm: float = 500.0,
 ) -> pd.DataFrame:
     """Combine timing/statistics from position loops and cue matches."""
 
@@ -322,12 +385,6 @@ def summarize_corridor_info(
     epsilon = 1e-6
     base['end_time'] = base['end_time'] + epsilon
 
-    # Keep corridor ordering sane relative to the next corridor start
-    for idx in range(len(base) - 1):
-        next_start = base.loc[idx + 1, 'start_time']
-        if pd.notna(next_start):
-            base.loc[idx, 'end_time'] = min(base.loc[idx, 'end_time'], next_start)
-
     base['duration_ms'] = base['end_time'] - base['start_time']
     base['start_position_cm'] = base['start_position'] / 250.0
     base['end_position_cm'] = base['end_position'] / 250.0
@@ -344,6 +401,8 @@ def summarize_corridor_info(
 
     if 'num_matched_cues' not in base:
         base['num_matched_cues'] = np.nan
+
+    base['corridor_offset_cm'] = base['corridor_id'] * corridor_length_cm
 
     return base
 
@@ -366,6 +425,15 @@ def compute_corridor_artifacts(
 
     cue_state_with_corridors = annotate_cue_states_with_corridors(cue_state_df)
     cue_result_with_corridors = annotate_cue_results_with_corridors(cue_result_df)
+    cue_state_with_corridors = _deduplicate_states_using_results(
+        cue_state_with_corridors,
+        cue_result_with_corridors,
+    ).sort_values('time').reset_index(drop=True)
+
+    cue_result_with_corridors = _deduplicate_results_using_states(
+        cue_result_with_corridors,
+        cue_state_with_corridors,
+    ).sort_values('time').reset_index(drop=True)
     position_loops = detect_position_loops(position_df, verbose=verbose)
 
     cue_matches = match_cue_states_to_results(
@@ -374,12 +442,42 @@ def compute_corridor_artifacts(
         verbose=verbose,
     ) if not cue_state_with_corridors.empty and not cue_result_with_corridors.empty else pd.DataFrame()
 
+    if not cue_matches.empty and 'result_idx' in cue_matches:
+        valid = cue_matches.dropna(subset=['result_idx', 'state_corridor'])
+        if not valid.empty:
+            result_indices = valid['result_idx'].astype(int).to_numpy()
+            assigned_corridors = valid['state_corridor'].to_numpy()
+            cue_result_with_corridors.loc[result_indices, 'corridor_id'] = assigned_corridors
+            cue_result_with_corridors['cue_index'] = cue_result_with_corridors.groupby('corridor_id').cumcount()
+
     corridor_info = summarize_corridor_info(
         position_loops,
         cue_state_with_corridors,
         cue_result_with_corridors,
         cue_matches,
+        corridor_length_cm=corridor_length_cm,
     )
+
+    if verbose and not corridor_info.empty and 'num_cue_results' in corridor_info:
+        irregular = corridor_info.dropna(subset=['num_cue_results'])
+        irregular = irregular[irregular['num_cue_results'] != 7]
+        if not irregular.empty:
+            ids = ', '.join(str(int(idx)) for idx in irregular['corridor_id'].tolist())
+            print(f"  Note: {len(irregular)} corridor(s) do not contain 7 cue hits (IDs: {ids})")
+
+    if verbose and not cue_result_with_corridors.empty:
+        duplicated = (
+            cue_result_with_corridors
+            .groupby(['corridor_id', 'id'])
+            .filter(lambda g: len(g) > 1)
+        )
+        if not duplicated.empty:
+            report = (
+                duplicated[['corridor_id', 'id', 'time', 'position']]
+                .sort_values(['corridor_id', 'id', 'time'])
+            )
+            print("  Warning: Duplicate cue results detected (same corridor & ID):")
+            print(report.to_string(index=False))
 
     return CorridorComputationArtifacts(
         corridor_info=corridor_info,

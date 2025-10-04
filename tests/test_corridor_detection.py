@@ -15,6 +15,7 @@ pytestmark = pytest.mark.filterwarnings(
 
 from behavioral_analysis.processing import (  # noqa: E402
     add_corridor_info_to_events,
+    add_corridor_to_position,
     compute_corridor_artifacts,
 )
 
@@ -71,8 +72,9 @@ def test_corridor_end_time_extends_past_latest_cue():
     second_corridor = corridor_info.loc[corridor_info['corridor_id'] == 1].iloc[0]
     assert second_corridor['trigger'] == 'cue_reset'
     assert second_corridor['num_cue_results'] == 7
-    # Ensure corridor windows stay ordered
-    assert first_corridor['end_time'] <= second_corridor['start_time']
+    # Corridor 0 should extend at least to the next corridor start because the
+    # final cue result occurs afterwards
+    assert first_corridor['end_time'] >= second_corridor['start_time']
 
     # Matched cue counts should be available for debugging/QA
     assert first_corridor['num_matched_cues'] == 7
@@ -96,12 +98,19 @@ def test_event_assignment_respects_correct_corridor():
         'Path Position': path_df.copy(),
     }
 
+    position_with_corridors = add_corridor_to_position(
+        path_df,
+        corridor_info,
+        corridor_length_cm=500.0,
+        verbose=False,
+    )
+
     updated = add_corridor_info_to_events(
         frames,
         corridor_info,
         corridor_length_cm=500.0,
         verbose=False,
-        position_df=path_df,
+        position_df=position_with_corridors,
     )
 
     cue_results_labeled = updated['Cue Result']
@@ -111,3 +120,44 @@ def test_event_assignment_respects_correct_corridor():
 
     expected_corridors = [0] * 7 + [1] * 7
     assert list(cue_results_labeled['corridor_id']) == expected_corridors
+
+
+def test_cue_global_position_matches_offset():
+    path_df, cue_states, cue_results = _make_mock_session()
+
+    artifacts = compute_corridor_artifacts(
+        cue_state_df=cue_states,
+        position_df=path_df,
+        cue_result_df=cue_results,
+        verbose=False,
+    )
+    corridor_info = artifacts.corridor_info
+
+    position_with_corridors = add_corridor_to_position(
+        path_df,
+        corridor_info,
+        corridor_length_cm=500.0,
+        verbose=False,
+    )
+
+    frames = {
+        'Cue State': cue_states.copy(),
+        'Cue Result': cue_results.copy(),
+        'Path Position': path_df.copy(),
+    }
+
+    updated = add_corridor_info_to_events(
+        frames,
+        corridor_info,
+        corridor_length_cm=500.0,
+        verbose=False,
+        position_df=position_with_corridors,
+    )
+
+    cue_results_labeled = updated['Cue Result']
+    offsets = corridor_info.set_index('corridor_id')['corridor_offset_cm']
+
+    for _, row in cue_results_labeled.iterrows():
+        cid = int(row['corridor_id'])
+        expected = offsets[cid] + row['position'] / 250.0
+        assert abs(row['global_position_cm'] - expected) < 1e-6

@@ -58,11 +58,11 @@ for _, lick in licks.iterrows():
             
             # Determine if this is during a rewarded or unrewarded trial
             # Find the most recent trial start before this lick
-            trials_before = trials[trials['cue_hit_ms'] <= lick_time]
+            trials_before = trials[trials['cue_outcome_ms'] <= lick_time]
             if len(trials_before) > 0:
                 recent_trial = trials_before.iloc[-1]
                 # Check if lick is within reasonable time of trial (within 60 seconds)
-                if lick_time - recent_trial['cue_hit_ms'] < 60000:
+                if lick_time - recent_trial['cue_outcome_ms'] < 60000:
                     if recent_trial['is_rewarding']:
                         rewarded_lick_counts[bin_idx] += 1
                     else:

@@ -53,8 +53,8 @@ def create_cue_aligned_licking_analysis(hdf5_path: Path, output_dir: Path):
 
         # Get licks for this trial (between cue appearance and result)
         trial_start = trial['cue_onset_ms'] / 1000.0  # Convert to seconds
-        if pd.notna(trial['cue_hit_ms']):
-            trial_end = trial['cue_hit_ms'] / 1000.0
+        if pd.notna(trial['cue_outcome_ms']):
+            trial_end = trial['cue_outcome_ms'] / 1000.0
         else:
             trial_end = trial_start + 5.0  # 5 second timeout
 

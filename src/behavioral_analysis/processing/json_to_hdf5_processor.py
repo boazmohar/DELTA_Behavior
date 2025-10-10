@@ -30,6 +30,11 @@ from behavioral_analysis.io.json_parser import parse_json_file
 from behavioral_analysis.io.dataframe_builder import extract_events_by_type, create_combined_dataframe
 from behavioral_analysis.io.hdf5_writer import save_to_hdf5
 from behavioral_analysis.processing.corridor_detector_simple import detect_corridors_simple, add_corridor_info_to_events
+from behavioral_analysis.analysis.lick_alignment import (
+    align_lick_events_to_position,
+    align_licks_to_trials,
+)
+
 from behavioral_analysis.processing.trial_matcher import create_trial_dataframe, calculate_performance_metrics
 
 
@@ -42,7 +47,8 @@ def process_json_to_hdf5(
     enable_monotonic_position: bool = True,
     limit: Optional[int] = None,
     overwrite: bool = True,
-    verbose: bool = True
+    verbose: bool = True,
+    cue_window_half_width_cm: float = 10.0,
 ) -> str:
     """
     Process JSON behavioral data to HDF5 with corridor detection and global position.
@@ -64,6 +70,7 @@ def process_json_to_hdf5(
         limit: Optional limit on number of events to process (default: None)
         overwrite: Whether to overwrite existing output file (default: True)
         verbose: Whether to print progress information (default: True)
+        cue_window_half_width_cm: Half-width (cm) used to classify licks near cues (default: 10 cm)
 
     Returns:
         Path to the saved HDF5 file
@@ -168,6 +175,14 @@ def process_json_to_hdf5(
     # Add corridor info to the updated events
     updated_events['Corridor_Info'] = corridor_info
 
+    licks_with_position = align_lick_events_to_position(
+        updated_events,
+        position_with_corridors,
+    )
+
+    if not licks_with_position.empty:
+        updated_events['Lick_Position'] = licks_with_position
+
     # Step 3.5: Create trial-based dataframe if requested
     trials_df = None
     if include_trials:
@@ -187,9 +202,27 @@ def process_json_to_hdf5(
                 updated_events[cue_result_key],
                 corridor_length_cm=corridor_length_cm,
                 verbose=verbose,
-                position_df=updated_events.get('Position')
+                position_df=updated_events.get('Position'),
+                cue_window_half_width_cm=cue_window_half_width_cm,
             )
+
+            alignment = align_licks_to_trials(
+                trials_df,
+                licks_with_position,
+                cue_window_half_width_cm=cue_window_half_width_cm,
+            )
+
+            trials_df = alignment.trials
             updated_events['Trials'] = trials_df
+
+            if not alignment.licks_with_position.empty:
+                updated_events['Lick_Position'] = alignment.licks_with_position
+
+            if not alignment.licks_with_trial.empty:
+                updated_events['Lick_Cue_Window'] = alignment.licks_with_trial
+
+            if verbose:
+                print(f"  Lick alignment: {len(alignment.licks_with_trial)} licks within ±{cue_window_half_width_cm:g} cm")
 
             # Calculate performance metrics
             if verbose:
@@ -224,7 +257,8 @@ def process_json_to_hdf5(
         'corridor_length_cm': corridor_length_cm,
         'enable_monotonic_position': enable_monotonic_position,
         'num_corridors': len(corridor_info),
-        'include_combined': include_combined
+        'include_combined': include_combined,
+        'cue_window_half_width_cm': cue_window_half_width_cm,
     }
 
     # Save to HDF5
@@ -268,6 +302,8 @@ def main():
     # Processing options
     parser.add_argument('--corridor-length', type=float, default=500.0,
                         help='Length of each corridor in centimeters')
+    parser.add_argument('--cue-window-half-width', type=float, default=10.0,
+                        help='Half-width (cm) used to classify licks near cues')
     parser.add_argument('--disable-monotonic-position',
                         action='store_true',
                         help='Disable monotonic global position calculation')
@@ -294,7 +330,8 @@ def main():
             enable_monotonic_position=not args.disable_monotonic_position,
             limit=args.limit,
             overwrite=not args.no_overwrite,
-            verbose=not args.quiet
+            verbose=not args.quiet,
+            cue_window_half_width_cm=args.cue_window_half_width
         )
 
         if not args.quiet:

@@ -14,6 +14,12 @@ from behavioral_analysis.analysis.corridor_metrics import (
     load_log_entries,
 )
 
+from behavioral_analysis.analysis.lick_alignment import (
+    LickTrialAlignment,
+    align_lick_events_to_position,
+    align_licks_to_trials,
+)
+
 __all__ = [
     "HitRateBin",
     "LickRateBin",
@@ -26,4 +32,7 @@ __all__ = [
     "extract_lick_positions",
     "extract_path_positions",
     "load_log_entries",
+    "LickTrialAlignment",
+    "align_lick_events_to_position",
+    "align_licks_to_trials",
 ]

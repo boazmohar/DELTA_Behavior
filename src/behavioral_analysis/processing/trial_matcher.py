@@ -85,7 +85,8 @@ def create_trial_dataframe(
     cue_result_df: pd.DataFrame,
     corridor_length_cm: float = 500.0,
     verbose: bool = True,
-    position_df: pd.DataFrame = None
+    position_df: pd.DataFrame = None,
+    cue_window_half_width_cm: float = 10.0,
 ) -> pd.DataFrame:
     """
     Create a trial-based dataframe from Cue_State and Cue_Result events.
@@ -102,9 +103,11 @@ def create_trial_dataframe(
         cue_result_df: DataFrame of Cue_Result events
         corridor_length_cm: Length of each corridor in cm
         verbose: Whether to print processing statistics
+        position_df: Optional position dataframe with global positions
+        cue_window_half_width_cm: Half-width (cm) for cue-centered window metrics
 
     Returns:
-        DataFrame with one row per trial
+        DataFrame with one row per trial (includes cue window entry/exit times)
     """
     # Calculate corridor based on cue counting (7 cues per corridor, IDs 0-6)
     corridor_counter = 0
@@ -173,7 +176,7 @@ def create_trial_dataframe(
 
             # Timing
             'cue_onset_ms': state['time'],
-            'cue_hit_ms': result['time'],
+            'cue_outcome_ms': result['time'],
             'reaction_time_s': (result['time'] - state['time']) / 1000.0,
 
             # Response
@@ -195,6 +198,38 @@ def create_trial_dataframe(
     trials_df['licked'] = trials_df['outcome'].isin(['Hit', 'FA'])
     trials_df['session_time_min'] = trials_df['cue_onset_ms'] / 60000.0
 
+    # Calculate cue window entry/exit based on position traces
+    if position_df is not None and 'global_position_cm' in position_df.columns:
+        if verbose:
+            print("  Calculating cue window entry/exit times...")
+
+        position_sorted = position_df.sort_values('global_position_cm').reset_index(drop=True)
+        pos_globals = position_sorted['global_position_cm'].to_numpy()
+        pos_times = position_sorted['time'].to_numpy()
+
+        entry_times = []
+        exit_times = []
+
+        for _, trial in trials_df.iterrows():
+            lower = trial['global_position_cm'] - cue_window_half_width_cm
+            upper = trial['global_position_cm'] + cue_window_half_width_cm
+
+            lower_idx = np.searchsorted(pos_globals, lower, side='left')
+            upper_idx = np.searchsorted(pos_globals, upper, side='right') - 1
+
+            if lower_idx < len(pos_globals) and 0 <= lower_idx <= upper_idx:
+                entry_times.append(pos_times[lower_idx])
+                exit_times.append(pos_times[min(upper_idx, len(pos_times) - 1)])
+            else:
+                entry_times.append(np.nan)
+                exit_times.append(np.nan)
+
+        trials_df['cue_window_entry_ms'] = entry_times
+        trials_df['cue_window_exit_ms'] = exit_times
+    else:
+        trials_df['cue_window_entry_ms'] = np.nan
+        trials_df['cue_window_exit_ms'] = np.nan
+
     # Add mouse position at hit time if position data is provided
     if position_df is not None and len(trials_df) > 0:
         if verbose:
@@ -208,7 +243,7 @@ def create_trial_dataframe(
 
         for _, trial in trials_df.iterrows():
             # Find closest position event to hit time
-            time_diffs = abs(position_sorted['time'] - trial['cue_hit_ms'])
+            time_diffs = abs(position_sorted['time'] - trial['cue_outcome_ms'])
             if len(time_diffs) > 0:
                 closest_idx = time_diffs.idxmin()
                 mouse = position_sorted.loc[closest_idx]

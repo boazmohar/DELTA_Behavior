@@ -20,6 +20,7 @@ DELTA_Behavior/
 ├── src/
 │   └── behavioral_analysis/      # Main package
 │       ├── __init__.py
+│       ├── analysis/             # Session-level analytics (e.g., lick alignment)
 │       ├── io/                   # Input/Output functionality
 │       ├── processing/           # Data processing pipeline
 │       └── visualization/        # Plotting helpers
@@ -31,6 +32,8 @@ DELTA_Behavior/
 ├── process_and_analyze.py        # Minimal processing CLI
 └── README.md                     # This file
 ```
+
+Analysis code that adds derived metrics (for example, cue-aligned lick windows) lives in `src/behavioral_analysis/analysis`. Notebooks should import from this package instead of re-implementing data wrangling logic.
 
 ## Quick Start
 
@@ -51,7 +54,8 @@ result = process_json_to_hdf5(
     output_file="output.h5",
     corridor_length_cm=500.0,
     include_trials=True,  # Create trial dataframe
-    verbose=True
+    verbose=True,
+    cue_window_half_width_cm=10.0,  # Flag licks within ±10 cm of each cue
 )
 ```
 
@@ -83,8 +87,12 @@ import pandas as pd
 
 # Open the HDF5 store
 with pd.HDFStore('output.h5', 'r') as store:
-    # Access trial data
+    # Access trial data (includes licks_in_window counts)
     trials = store['/events/Trials']
+
+    # Access lick alignment tables
+    lick_positions = store.get('/events/Lick_Position')
+    lick_windows = store.get('/events/Lick_Cue_Window')
 
     # Access corridor information
     corridors = store['/events/Corridor_Info']
@@ -133,6 +141,11 @@ Each trial includes:
   - **CR (Correct Rejection)**: Non-rewarding cue + no lick
 - **Timing information**: Cue onset, hit time, reaction time
 - **Response metrics**: Number of licks, reward delivery
+
+Cue-aligned licking metrics are computed during processing:
+- `licks_in_window` counts are appended to the Trials table (±cue_window_half_width_cm).
+- `events/Lick_Position` stores every lick with its global position and corridor.
+- `events/Lick_Cue_Window` stores only licks that landed within each cue window with offset information.
 
 ## Data Structure
 
@@ -188,9 +201,11 @@ The Trials dataframe contains the following columns:
 | `cue_position` | Position value in arbitrary units |
 | `cue_position_cm` | Position in centimeters |
 | `global_position_cm` | Global position across all corridors |
-| `cue_onset_ms` | Time when cue was created |
-| `cue_hit_ms` | Time when cue was hit |
+| `cue_onset_ms` | Time when the cue was scheduled/assigned |
+| `cue_outcome_ms` | Time when the cue delivered its outcome (result event) |
 | `reaction_time_s` | Time between creation and hit (seconds) |
+| `cue_window_entry_ms` | First time the animal entered the ± cue window (global frame) |
+| `cue_window_exit_ms` | Last time the animal left the ± cue window (global frame) |
 | `num_licks_pre` | Licks before reward window |
 | `num_licks_reward` | Licks in reward window |
 | `gave_reward` | Whether reward was delivered |
@@ -339,6 +354,7 @@ process_json_to_hdf5(
 - `include_combined`: Include combined DataFrame (default: False)
 - `include_trials`: Create trial-based dataframe (default: True)
 - `enable_monotonic_position`: Ensure monotonic global positions (default: True)
+- `cue_window_half_width_cm`: Half-width (cm) used for cue-aligned lick windows (default: 10)
 - `limit`: Limit number of events to process (default: None)
 - `overwrite`: Overwrite existing output file (default: True)
 - `verbose`: Print progress information (default: True)
@@ -361,7 +377,10 @@ corridor_info, position_with_corridors = detect_corridors_simple(
 
 # Create trial dataframe
 trials_df = create_trial_dataframe(
-    cue_state_df, cue_result_df, corridor_length_cm=500.0
+    cue_state_df,
+    cue_result_df,
+    corridor_length_cm=500.0,
+    cue_window_half_width_cm=10.0,
 )
 
 # Calculate performance metrics

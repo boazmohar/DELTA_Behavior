@@ -28,14 +28,14 @@ post_time = 10000  # 10 seconds after
 # Process rewarded trials
 print("\nProcessing rewarded trials...")
 rewarded_trials = trials[trials['is_rewarding'] == True].copy()
-rewarded_trials = rewarded_trials.sort_values('cue_hit_ms').reset_index(drop=True)
+rewarded_trials = rewarded_trials.sort_values('cue_outcome_ms').reset_index(drop=True)
 
 print(f"Found {len(rewarded_trials)} rewarded trials")
 
 # Plot raster for rewarded trials
 trial_num = 0
 for idx, trial in rewarded_trials.iterrows():
-    cue_time = trial['cue_hit_ms']
+    cue_time = trial['cue_outcome_ms']
     
     # Find licks within window
     licks_in_window = licks[
@@ -73,14 +73,14 @@ ax1.legend(handles=[green_patch, orange_patch], loc='upper right')
 # Process unrewarded trials
 print(f"\nProcessing unrewarded trials...")
 unrewarded_trials = trials[trials['is_rewarding'] == False].copy()
-unrewarded_trials = unrewarded_trials.sort_values('cue_hit_ms').reset_index(drop=True)
+unrewarded_trials = unrewarded_trials.sort_values('cue_outcome_ms').reset_index(drop=True)
 
 print(f"Found {len(unrewarded_trials)} unrewarded trials")
 
 # Plot raster for unrewarded trials
 trial_num = 0
 for idx, trial in unrewarded_trials.iterrows():
-    cue_time = trial['cue_hit_ms']
+    cue_time = trial['cue_outcome_ms']
     
     # Find licks within window
     licks_in_window = licks[
@@ -137,7 +137,7 @@ for trial_type, trial_df in [("Rewarded", rewarded_trials), ("Unrewarded", unrew
     total_licks_post = 0
     
     for idx, trial in trial_df.iterrows():
-        cue_time = trial['cue_hit_ms']
+        cue_time = trial['cue_outcome_ms']
         
         licks_pre = licks[(licks['time'] >= cue_time - 2000) & (licks['time'] < cue_time)]
         licks_post = licks[(licks['time'] >= cue_time) & (licks['time'] <= cue_time + 2000)]

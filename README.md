@@ -43,6 +43,10 @@ Add the `src/` directory to your `PYTHONPATH` (or install the package) before im
 export PYTHONPATH="$(pwd)/src:${PYTHONPATH}"
 ```
 
+### Data validation principle
+
+When required inputs are missing, fail fast with a clear error (raise) instead of silently skipping work. Avoid patterns like `if df.empty: ...`—surface the issue so upstream data problems can be fixed.
+
 ### Basic Usage
 
 ```python

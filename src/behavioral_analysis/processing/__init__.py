@@ -22,6 +22,13 @@ from behavioral_analysis.processing.corridor_detector_simple import (
 )
 from behavioral_analysis.processing.trial_matcher import create_trial_dataframe, calculate_performance_metrics
 from behavioral_analysis.processing.json_to_hdf5_processor import process_json_to_hdf5
+from behavioral_analysis.processing.optostim import (
+    convert_optostim_session,
+    normalize_matlab_logs,
+    build_optostim_trials,
+    build_lick_table,
+    build_reward_tables,
+)
 
 __all__ = [
     'CorridorComputationArtifacts',
@@ -37,4 +44,9 @@ __all__ = [
     'create_trial_dataframe',
     'calculate_performance_metrics',
     'process_json_to_hdf5',
+    'convert_optostim_session',
+    'normalize_matlab_logs',
+    'build_optostim_trials',
+    'build_lick_table',
+    'build_reward_tables',
 ]

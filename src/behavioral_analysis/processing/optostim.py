@@ -34,6 +34,57 @@ class OptostimConversionResult:
     events: List[Dict]
     summary: Dict[str, int]
 
+_OUTCOME_ALIASES: Dict[str, str] = {
+    # False alarms
+    'falsealarm': 'FA',
+    'immediatefalsealarm': 'FA',
+    'fa': 'FA',
+    # Correct rejections
+    'correctrejection': 'CR',
+    'correct rejection': 'CR',
+    'cr': 'CR',
+    # Go-trial outcomes
+    'hit': 'Hit',
+    'miss': 'Miss',
+    # Some tasks log miss-like outcomes with different labels
+    'noresponse': 'Miss',
+    'no response': 'Miss',
+    'timeout': 'Miss',
+    'omission': 'Miss',
+}
+
+
+def _normalize_outcome_label(
+    outcome_raw: object,
+    trial_type: object,
+    rewarded: bool,
+    num_licks_post_stim: int,
+) -> tuple[Optional[str], str]:
+    """
+    Normalize MATLAB outcome strings to the canonical set: Hit, Miss, FA, CR.
+
+    Returns a tuple of (normalized_outcome, outcome_source) where outcome_source
+    is either 'raw', 'inferred', or 'unknown'.
+    """
+
+    if isinstance(outcome_raw, str):
+        stripped = outcome_raw.strip()
+        if stripped:
+            key = stripped.lower()
+            mapped = _OUTCOME_ALIASES.get(key)
+            if mapped is not None:
+                return mapped, 'raw'
+            if stripped in {'Hit', 'Miss', 'FA', 'CR'}:
+                return stripped, 'raw'
+
+    trial_type_key = trial_type.strip().lower() if isinstance(trial_type, str) else ''
+    if trial_type_key in {'go', 'reward', 'rewarding'}:
+        return ('Hit' if (rewarded or num_licks_post_stim > 0) else 'Miss'), 'inferred'
+    if trial_type_key in {'nogo', 'no-go', 'no go', 'nonreward', 'non-reward', 'nonrewarding', 'non-rewarding'}:
+        return ('FA' if num_licks_post_stim > 0 else 'CR'), 'inferred'
+
+    return None, 'unknown'
+
 
 def normalize_matlab_logs(events: List[Dict]) -> pd.DataFrame:
     """Flatten MATLAB Log entries into a sortable DataFrame."""
@@ -164,10 +215,16 @@ def build_optostim_trials(
         num_licks_pre = int((lick_times < stim_anchor).sum()) if num_licks and not np.isnan(stim_anchor) else 0
         num_licks_post = num_licks - num_licks_pre if num_licks else 0
 
-        outcome_map = {'FalseAlarm': 'FA', 'CorrectRejection': 'CR', 'Hit': 'Hit', 'Miss': 'Miss'}
-        outcome_label = outcome_map.get(outcome_raw, outcome_raw or 'Unknown')
         trial_type = start_row.get('trialType')
         is_rewarding = isinstance(trial_type, str) and trial_type.strip().lower() == 'go'
+        outcome_label, outcome_source = _normalize_outcome_label(
+            outcome_raw=outcome_raw,
+            trial_type=trial_type,
+            rewarded=rewarded,
+            num_licks_post_stim=num_licks_post,
+        )
+        if outcome_label is None:
+            outcome_label = 'Unknown'
         correct = outcome_label in ['Hit', 'CR']
         was_hit = outcome_label in ['Hit', 'FA']
 
@@ -195,6 +252,7 @@ def build_optostim_trials(
                 'end_time_ms': end_time,
                 'trial_duration_ms': (end_time - start_row.get('time_ms')) if not np.isnan(end_time) else np.nan,
                 'outcome_raw': outcome_raw,
+                'outcome_source': outcome_source,
                 'outcome': outcome_label,
                 'rewarded': rewarded,
                 'correct': correct,

@@ -127,9 +127,17 @@ def plot_performance_summary(trials_df: pd.DataFrame,
     # 1. Outcome distribution (pie chart)
     ax1 = fig.add_subplot(gs[0, 0])
     outcome_counts = trials_df['outcome'].value_counts()
-    colors = {'Hit': '#2ecc71', 'Miss': '#f39c12', 'FA': '#e74c3c', 'CR': '#3498db'}
-    pie_colors = [colors[x] for x in outcome_counts.index]
-    ax1.pie(outcome_counts.values, labels=outcome_counts.index, autopct='%1.1f%%',
+    colors = {
+        'Hit': '#2ecc71',
+        'Miss': '#f39c12',
+        'FA': '#e74c3c',
+        'CR': '#3498db',
+        'Unknown': '#95a5a6',
+    }
+    default_color = '#95a5a6'
+    outcome_labels = outcome_counts.index.astype(str)
+    pie_colors = [colors.get(label, default_color) for label in outcome_labels]
+    ax1.pie(outcome_counts.values, labels=outcome_labels, autopct='%1.1f%%',
             colors=pie_colors, startangle=90)
     ax1.set_title('Outcome Distribution', fontsize=11, fontweight='bold')
 

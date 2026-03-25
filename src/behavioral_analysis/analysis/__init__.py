@@ -20,6 +20,16 @@ from behavioral_analysis.analysis.lick_alignment import (
     align_licks_to_trials,
 )
 
+from behavioral_analysis.analysis.multi_day_summary import (
+    SessionConversion,
+    DayTransition,
+    ConversionFailure,
+    MultiDayTrialsResult,
+    collect_json_logs,
+    convert_json_sessions,
+    prepare_multi_day_trials,
+)
+
 
 __all__ = [
     "HitRateBin",
@@ -36,4 +46,11 @@ __all__ = [
     "LickTrialAlignment",
     "align_lick_events_to_position",
     "align_licks_to_trials",
+    "SessionConversion",
+    "DayTransition",
+    "ConversionFailure",
+    "MultiDayTrialsResult",
+    "collect_json_logs",
+    "convert_json_sessions",
+    "prepare_multi_day_trials",
 ]
